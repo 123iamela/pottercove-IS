@@ -1,0 +1,265 @@
+---
+title: "IS"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+### Setup
+
+```{r setup, eval=T, echo=FALSE}
+
+library(multiweb)
+library(tidyverse)
+library(NetIndices)
+
+if(file.exists("IS.RData")) load("IS.RData")
+
+```
+
+### Read Potter Cove food web data frame
+
+```{r fw, echo=FALSE, message=FALSE, results='asis'}
+#
+# Read interactions data frame with species body mass, biomass/density and interaction dimensionality
+#
+# consumer = predator
+# resource = prey
+# c_bodymass = consumer mean body mass (g)
+# r_bodymass = resource mean body mass (g)
+# r_density = resource mean abundance (ind/m2)
+# r_biomass = resource mean biomass (g WW/m2)
+# D = interaction dimensionality (2D or 3D)
+#
+p <- read.delim("Data/iD_PC.txt", dec=",")
+str(p)
+
+```
+
+### Data transformation
+
+```{r data-transformation}
+#
+# Conversion body mass and biomass from g to kg
+p <- p %>% mutate(c_bodymass=c_bodymass/1000, r_bodymass=r_bodymass/1000, r_biomass=r_biomass/1000)
+#
+# Assign 1 to resources whose body size is decoupled from the consumer's body size
+p <- p %>% mutate(r_bodymass=if_else(is.na(r_bodymass), 1, r_bodymass)) # MAA, necromass, fresh and aged detritus
+p <- p %>% mutate(r_density=if_else(r_bodymass==1, 1, r_density))
+#
+# Manually assign 1 in r_density and r_bodymass to sponge species
+p <- p %>% mutate(r_density=if_else(resource=="Chalinidae", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Chalinidae", 1, r_bodymass))
+p <- p %>% mutate(r_density=if_else(resource=="Dendrilla antarctica", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Dendrilla antarctica", 1, r_bodymass))
+p <- p %>% mutate(r_density=if_else(resource=="Porifera", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Porifera", 1, r_bodymass))
+p <- p %>% mutate(r_density=if_else(resource=="Rosella antartica", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Rosella antartica", 1, r_bodymass))
+p <- p %>% mutate(r_density=if_else(resource=="Rossella sp.", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Rossella sp.", 1, r_bodymass))
+p <- p %>% mutate(r_density=if_else(resource=="Stylo_Myca", 1, r_density))
+p <- p %>% mutate(r_bodymass=if_else(resource=="Stylo_Myca", 1, r_bodymass))
+#
+# When resources density information is not available assign the value -999 so the function can calculate the body mass based on allometric relationship of its consumers and the resource density according Pawar et al. (2012) original equation
+p$r_density[is.na(p$r_density)] <- -999
+#
+# Check that there is no body mass and/or density NA data for resources and consumers
+p %>% filter(is.na(r_bodymass))
+p %>% filter(is.na(c_bodymass))
+p %>% filter(is.na(r_density))
+
+```
+
+### Calculate interaction strengths
+
+```{r calc-IS}
+#
+# Calculate the interaction strength (IS)
+#
+# mR = resource body mass (uses empirical data (r_bodymass) in case it's available or calculate it based on allometric relationship of its consumers)
+# xR = resource density (uses empirical data (r_density) in case it's available or or calculate it based on allometric relationship of its consumers)
+# qRC = IS
+#
+# with variability
+IS_sim <- calc_interaction_intensity(p, r_bodymass, r_density, c_bodymass, D, nsims = 1000) #pc_w
+# without variability
+IS <- calc_interaction_intensity(p, r_bodymass, r_density, c_bodymass, D) #pc_w1
+
+# 
+# Calculate the IS mean, median and SD
+IS_med <- IS_sim %>% group_by(consumer, resource) %>% #pc_w_med
+  summarise(qRC_mean = mean(qRC), 
+            qRC_sd = sd(qRC), 
+            qRC_median = median(qRC))
+
+IS_med <- inner_join(IS_med, IS %>% dplyr::select(consumer, resource, qRC), by=join_by(consumer, resource))
+
+```
+
+### Test IS distribution
+
+```{r test-IS}
+#
+# AIC test
+library(univariateML)
+library(fitdistrplus)
+library(gamlss)
+
+x <- IS_med$qRC_median
+
+aic.result <- c(AIC(mlunif(x), mlexp(x), mlpower(x), mllnorm(x), mlnorm(x), mlgamma(x)))
+
+IS_fit <- bind_cols(aic.result) %>% mutate(Model = c("Uniform", "Exponential", "Power-law", "log-Normal", "Normal", "Gamma"), deltaAIC = AIC - min(AIC)) %>% arrange(deltaAIC) %>% dplyr::select(Model, df, AIC, deltaAIC)
+
+IS_fit
+
+```
+
+### Species properties
+
+```{r spp-prop}
+#
+# Convert to an igraph with weights
+library(igraph)
+#
+pw <- graph_from_data_frame(IS_med %>% dplyr::select(resource, consumer, qRC_median) %>% rename(weight=qRC_median), directed=TRUE)
+#
+# Explore species interactions strength
+# Add in, out & total strengths as species attr
+V(pw)$ISis <- strength(pw, mode="in")
+V(pw)$ISout <- strength(pw, mode="out")
+V(pw)$IStotal <- strength(pw, mode="all")
+vertex.attributes(pw)
+#
+# Calculate unweighted topological indices
+calc_topological_indices(pw)
+#
+# Add topological species properties as vertex attributes
+adj_mat <- as_adjacency_matrix(pw, sparse=TRUE)
+tl <- round(TrophInd(as.matrix(adj_mat)), digits=3)
+# Trophic Level
+V(pw)$TL <- tl$TL
+# Omnivory
+V(pw)$Omn <- tl$OI
+vertex.attributes(pw)
+#
+# Create data frame with species properties
+spp_name <- as.data.frame(V(pw)$name)
+#
+spp_ISin <- as.data.frame(V(pw)$ISin)
+spp_ISout <- as.data.frame(V(pw)$ISout)
+spp_IStotal <- as.data.frame(V(pw)$IStotal)
+spp_tl <- as.data.frame(V(pw)$TL)
+spp_omn <- as.data.frame(V(pw)$Omn)
+#
+# Calculate species Degree
+deg <- as.data.frame(igraph::degree(pw, mode="total"))
+#
+# Bind all species properties in one data frame
+spp_prop <- bind_cols(spp_name, spp_ISin, spp_ISout, spp_IStotal, spp_tl, spp_omn, deg)
+colnames(spp_prop) <- c("TrophicSpecies", "in_IS", "out_IS", "total_IS", "TL", "Omn", "Degree")
+#
+# Summary of species total and median Interaction Strength
+# Total IS
+spp_prop <- spp_prop %>% mutate(cumsum_str=order_by(-total_IS, cumsum(total_IS)), prop_str=cumsum_str/(sum(total_IS))) %>% mutate(rank_spp=dense_rank(desc(total_IS)), prop_spp=rank_spp/nrow(spp_prop))
+# Median IS
+# consumers (incoming interactions)
+con_int <- IS_sim %>% dplyr::select(consumer, qRC) %>% dplyr::rename(TrophicSpecies=consumer, IS=qRC)
+# resources (outgoing interactions)
+res_int <- IS_sim %>% dplyr::select(resource, qRC) %>% dplyr::rename(TrophicSpecies=resource, IS=qRC)
+# all interactions
+all_int <- bind_rows(con_int, res_int)
+total_int <- bind_rows(con_int, res_int) %>% dplyr::group_by(TrophicSpecies) %>% dplyr::summarize(median_IS=median(IS), median_IS_q1=quantile(IS, 0.25), median_IS_q3=quantile(IS, 0.75), median_IS_count=n())
+# Add to species properties data frame 'spp_prop'
+spp_prop <- spp_prop %>% left_join(total_int)
+# Summary of species IS
+require(Rmisc)
+sum_IS <- summarySE(all_int, measurevar="IS", groupvars="TrophicSpecies")
+spp_prop <- spp_prop %>% left_join(sum_IS)
+#
+# Calculate Trophic Similarity
+require(cheddar)
+require(readr)
+source("R/igraph_cheddar.r")
+# Transform g object ('igraph') into community files ('cheddar')
+igraph_to_cheddar(pw)
+# Calculate trophic similarity
+ts <- TrophicSimilarity(cc)
+# Generate a data frame with mean trophic similarity for each species
+mts <- tibble(TrophicSpecies=rownames(ts), meanTrophicSimil=colMeans(ts))
+# Join with species properties data frame 'spp_prop'
+spp_prop <- spp_prop %>% left_join(mts)
+# Summary of species TS
+spp_prop <- spp_prop %>% 
+            mutate(cumsum_str=order_by(-total_IS, cumsum(total_IS)),
+                   prop_str=cumsum_str/(sum(total_IS))) %>% 
+            mutate(rank_spp=dense_rank(desc(total_IS)),
+                   prop_spp=rank_spp/nrow(spp_prop))
+#
+# Save data frame with species properties as .csv
+write.csv(spp_prop, file="Data/spp_prop.csv")
+#
+# Remove objects from environment
+rm(spp_name, spp_ISin, spp_ISout, spp_IStotal, spp_tl, spp_omn, deg, tl, adj_mat)
+rm(con_int, res_int, all_int, total_int, sum_IS)
+rm(cc, mts, ts)
+
+```
+
+### Interaction strength - species topological properties regression tests
+
+```{r regIS-spprop}
+#
+## Quantile regression
+library(quantreg)
+# TL
+TL_qlm_q25 <- rq(log(total_IS) ~ TLu, data=spp_attr, tau=0.25)
+summary(TL_qlm_q25, se = "boot")
+TL_qlm_q50 <- rq(log(total_IS) ~ TLu, data=spp_attr)
+summary(TL_qlm_q50, se = "boot")
+TL_qlm_q75 <- rq(log(total_IS) ~ TLu, data=spp_attr, tau=0.75)
+summary(TL_qlm_q75, se = "boot")
+#
+# Degree
+Deg_qlm_q25 <- rq(log(total_IS) ~ log(Degree), data=spp_attr, tau=0.25)
+summary(Deg_qlm_q25, se = "boot")
+Deg_qlm_q50 <- rq(log(total_IS) ~ log(Degree), data=spp_attr)
+summary(Deg_qlm_q50, se = "boot")
+Deg_qlm_q75 <- rq(log(total_IS) ~ log(Degree), data=spp_attr, tau=0.75)
+summary(Deg_qlm_q75, se = "boot")
+#
+# Omnivory
+Omn_qlm_q25 <- rq(log(total_IS) ~ Omn, data=spp_attr, tau=0.25)
+summary(Omn_qlm_q25, se = "boot")
+Omn_qlm_q50 <- rq(log(total_IS) ~ Omn, data=spp_attr)
+summary(Omn_qlm_q50, se = "boot")
+Omn_qlm_q75 <- rq(log(total_IS) ~ Omn, data=spp_attr, tau=0.75)
+summary(Omn_qlm_q75, se = "boot")
+#
+# Trophic Similarity
+TS_qlm_q25 <- rq(log(total_IS) ~ meanTrophicSimil, data=spp_attr, tau=0.25)
+summary(TS_qlm_q25, se = "boot")
+TS_qlm_q50 <- rq(log(total_IS) ~ meanTrophicSimil, data=spp_attr)
+summary(TS_qlm_q50, se = "boot")
+TS_qlm_q75 <- rq(log(total_IS) ~ meanTrophicSimil, data=spp_attr, tau=0.75)
+summary(TS_qlm_q75, se = "boot")
+
+```
+
+### Load species sequential exctintions simulations 
+
+```{r stability-sim}
+#
+# Load sequential simulation results 
+load("Data/pc-is/wQSS_seq_extinctions.rds")
+
+```
+
+### Save .RData
+
+```{r Rsave}
+
+save.image(file="IS.RData")
+
+```

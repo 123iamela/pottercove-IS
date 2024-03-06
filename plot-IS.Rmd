@@ -1,0 +1,262 @@
+---
+title: "Plot_IS"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+### Setup
+
+```{r setup, eval=T, echo=FALSE}
+
+library(igraph)
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+library(grid)
+library(gridExtra)
+require(svglite)
+
+if(file.exists("IS.RData")) load("IS.RData")
+
+```
+
+```{r setup plots}
+#
+# Delete scientific notation
+options(scipen=999)
+
+#
+# Plots theme
+theme_new <- theme_minimal() +
+             theme(axis.title.x=element_text(size=23, face="bold", margin=margin(t=8, r=0, b=0, l=0)),
+                   axis.text.x=element_text(size=13, color="black"), 
+                   axis.title.y=element_text(size=23, face="bold", vjust=rel(2)),
+                   axis.text.y=element_text(size=13, color="black"),
+                   plot.title=element_text(size=23, face="bold", hjust=0.5),
+                   #panel.grid.major=element_line(color="gray50", linetype="dotted", linewidth=rel(0.6)),
+                   #panel.grid.minor=element_line(color="gray85", linetype="dotted", linewidth=rel(0.5)),
+                   panel.background=element_rect(fill="gray98", color="white"),
+                   legend.text=element_text(size=13),
+                   legend.title=element_text(size=16, face="bold"),
+                   legend.position="right")
+
+```
+
+### Plot Interaction Strength distribution
+
+```{r distribution-IS}
+#
+# Explore median Interaction Strength (qRC) distribution
+ggplot(IS_med, aes(qRC_median)) + 
+  geom_histogram(bins=50, fill="#b9e1ba", color="#457546") + 
+  labs(x="Median Interaction Strength", y="Frequency") + 
+  theme_new +
+  theme(axis.title.x=element_text(size=18),
+        axis.title.y=element_text(size=18))
+#
+# Save figure
+ggsave("Figures/distribution-IS.tiff", width=10, height=5)
+
+```
+
+### Plot Interaction Strength vs species topological properties regressions
+
+```{r IS-spprop}
+#
+## Plot total_IS vs TL
+tl <- ggplot(spp_prop, aes(x=TL, y=log(total_IS))) + 
+  geom_abline(intercept=coef(TL_qlm_q25)[1], slope=coef(TL_qlm_q25)[2], colour="#d9f0a3", linewidth=1.5) +
+  geom_abline(intercept=coef(TL_qlm_q50)[1], slope=coef(TL_qlm_q50)[2], colour="#74c476", linewidth=1.5) +
+  geom_abline(intercept=coef(TL_qlm_q75)[1], slope=coef(TL_qlm_q75)[2], colour="#006837", linewidth=1.5) +
+  geom_point() +
+  labs(x="Trophic Level", y="") +
+  theme_new +
+  theme(legend.position="none")
+#
+## Plot total_IS vs Degree
+dg <- ggplot(spp_prop, aes(x=log(Degree), y=log(total_IS))) + 
+  geom_abline(intercept = coef(Deg_qlm_q25)[1], slope=coef(Deg_qlm_q25)[2], colour="#d9f0a3", linewidth=1.5) +
+  geom_abline(intercept = coef(Deg_qlm_q50)[1], slope=coef(Deg_qlm_q50)[2], colour="#74c476", linewidth=1.5) +
+  geom_abline(intercept = coef(Deg_qlm_q75)[1], slope=coef(Deg_qlm_q75)[2], colour="#006837", linewidth=1.5) +
+  geom_point() +
+  labs(x="log(Degree)", y="") +
+  theme_new +
+  theme(legend.position="none")
+#
+## Plot mean_IS vs Omnivory
+omn <- ggplot(spp_prop, aes(x=Omn, y=log(total_IS))) +
+  geom_abline(intercept = coef(Omn_qlm_q25)[1], slope=coef(Omn_qlm_q25)[2], colour="#d9f0a3", linewidth=1.5) +
+  geom_abline(intercept = coef(Omn_qlm_q50)[1], slope=coef(Omn_qlm_q50)[2], colour="#74c476", linewidth=1.5) +
+  geom_abline(intercept = coef(Omn_qlm_q75)[1], slope=coef(Omn_qlm_q75)[2], colour="#006837", linewidth=1.5) +
+  geom_point() +
+  labs(x="Omnivory", y="") +
+  theme_new +
+  theme(legend.position="none")
+#
+## Plot total_IS vs TS
+ts <- ggplot(spp_prop, aes(x=meanTrophicSimil, y=log(total_IS))) +
+  geom_abline(intercept = coef(TS_qlm_q25)[1], slope=coef(TS_qlm_q25)[2], colour="#d9f0a3", linewidth=1.5) +
+  geom_abline(intercept = coef(TS_qlm_q50)[1], slope=coef(TS_qlm_q50)[2], colour="#74c476", linewidth=1.5) +
+  geom_abline(intercept = coef(TS_qlm_q75)[1], slope=coef(TS_qlm_q75)[2], colour="#006837", linewidth=1.5) +
+  geom_point() +
+  labs(x="Mean Trophic Similarity", y="") +
+  theme_new +
+  theme(legend.position="none")
+#
+## Plots in a single plot
+plot <- plot_grid(tl, dg, omn, ts,
+          nrow=2, ncol=2, 
+          labels=c("(a)", "(b)", "(c)", "(d)"), 
+          label_size=18,
+          hjust=-1.3,
+          vjust=2.3,
+          scale=0.95
+          )
+
+ylab <- textGrob("log (Total Interaction Strenght)", 
+                 gp=gpar(fontface="bold", fontsize=26), 
+                 rot=90,
+                 vjust=1.5)
+
+plot <- grid.arrange(arrangeGrob(plot, left=ylab))
+#
+# Save figure
+ggsave("Figures/metrics_vs_IS_qr.svg", plot, width=15, height=10)
+
+```
+
+### Plot species sequential exctintions simulations
+
+```{r}
+#
+# Extinctions by decreasing total Interaction Strength
+QSSe_is <- QSS_extinction_is %>% mutate(Network_prop=Size/110, Ext_prop=(110-Size)/110) %>% group_by(Last_deleted) %>% summarise(across(where(is.numeric), median))
+#
+q1 <- QSS_extinction_is %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q1=quantile(maxre, 0.25))
+q3 <- QSS_extinction_is %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q3=quantile(maxre, 0.75))
+#
+a <- ggplot() + 
+  geom_line(data=QSSe_is, aes(x=Ext_prop, y=maxre, colour=maxre), size=0.7) +
+  geom_point(data=QSSe_is, aes(x=Ext_prop, y=maxre, colour=maxre), size=2) +
+  geom_line(data=q1, aes(x=Ext_prop, y=median_QSS_q1), colour="grey80") + 
+  geom_line(data=q3, aes(x=Ext_prop, y=median_QSS_q3), colour="grey80") + 
+  theme_new +
+  labs(x="", y="", 
+       title="Interaction Strength") + 
+  geom_vline(xintercept=0.1727, linetype="dashed", colour="grey30") +
+  coord_cartesian(xlim=c(0, 0.4)) +
+  scale_colour_gradient(high="#d9f0a3", low="#006837") +
+  theme(legend.position="none")
+#
+# Extinctions by decreasing Trophic Level
+QSSe_tl <- QSS_extinction_tl %>% mutate(Network_prop=Size/110, Ext_prop=(110-Size)/110) %>% group_by(Last_deleted) %>% summarise(across(where(is.numeric), median))
+#
+q1 <- QSS_extinction_tl %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q1=quantile(maxre, 0.25))
+q3 <- QSS_extinction_tl %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q3=quantile(maxre, 0.75))
+#
+b <- ggplot() +
+  geom_line(data=QSSe_tl, aes(x=Ext_prop, y=maxre, colour=maxre), size=0.7) +
+  geom_point(data=QSSe_tl, aes(x=Ext_prop, y=maxre, colour=maxre), size=2) +
+  geom_line(data=q1, aes(x=Ext_prop, y=median_QSS_q1), colour="grey80") + 
+  geom_line(data=q3, aes(x=Ext_prop, y=median_QSS_q3), colour="grey80") + 
+  theme_new +
+  labs(x="", y="", 
+       title="Trophic Level") + 
+  geom_vline(xintercept=0.2454, linetype="dashed", colour="grey30") +
+  coord_cartesian(xlim=c(0, 0.4)) +
+  scale_colour_gradient(high="#d9f0a3", low="#006837") +
+  theme(legend.title=element_text(color="white")) +
+  theme(legend.position="none")
+#
+# Extinctions by decreasing Degree
+QSSe_deg <- QSS_extinction_deg %>% mutate(Network_prop=Size/110, Ext_prop=(110-Size)/110) %>% group_by(Last_deleted) %>% summarise(across(where(is.numeric), median))
+#
+q1 <- QSS_extinction_deg %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q1=quantile(maxre, 0.25))
+q3 <- QSS_extinction_deg %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q3=quantile(maxre, 0.75))
+#
+c <- ggplot() + 
+  geom_line(data=QSSe_deg, aes(x=Ext_prop, y=maxre, colour=maxre), size=0.7) +
+  geom_point(data=QSSe_deg, aes(x=Ext_prop, y=maxre, colour=maxre), size=2) +
+  geom_line(data=q1, aes(x=Ext_prop, y=median_QSS_q1), colour="grey80") + 
+  geom_line(data=q3, aes(x=Ext_prop, y=median_QSS_q3), colour="grey80") + 
+  theme_new +
+  labs(x="", y="", 
+       title="Degree") + 
+  geom_vline(xintercept=0.009, linetype="dashed", colour="grey30") +
+  coord_cartesian(xlim=c(0, 0.4)) +
+  scale_colour_gradient(high="#d9f0a3", low="#006837") +
+  theme(legend.title=element_text(color="white")) +
+  theme(legend.position="none")
+#
+# Extinctions by decreasing Omnivory
+QSSe_omn <- QSS_extinction_omn %>% mutate(Network_prop=Size/110, Ext_prop=(110-Size)/110) %>% group_by(Last_deleted) %>% summarise(across(where(is.numeric), median))
+#
+q1 <- QSS_extinction_omn %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q1=quantile(maxre, 0.25))
+q3 <- QSS_extinction_omn %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q3=quantile(maxre, 0.75))
+#
+d <- ggplot() + 
+  geom_line(data=QSSe_omn, aes(x=Ext_prop, y=maxre, colour=maxre), size=0.7) +
+  geom_point(data=QSSe_omn, aes(x=Ext_prop, y=maxre, colour=maxre), size=2) +
+  geom_line(data=q1, aes(x=Ext_prop, y=median_QSS_q1), colour="grey80") + 
+  geom_line(data=q3, aes(x=Ext_prop, y=median_QSS_q3), colour="grey80") + 
+  theme_new +
+  labs(x="", y="", 
+       title="Omnivory") + 
+  geom_vline(xintercept=0.245454545, linetype="dashed", colour="grey30") +
+  coord_cartesian(xlim=c(0, 0.4)) +
+  scale_colour_gradient(high="#d9f0a3", low="#006837") +
+  theme(legend.title=element_text(color="white")) +
+  theme(legend.position="none")
+#
+# Extinctions by decreasing Trophic Similarity
+QSSe_ts <- QSS_extinction_ts %>% mutate(Network_prop=Size/110, Ext_prop=(110-Size)/110) %>% group_by(Last_deleted) %>% summarise(across(where(is.numeric), median))
+#
+q1 <- QSS_extinction_ts %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q1=quantile(maxre, 0.25))
+q3 <- QSS_extinction_ts %>% mutate(Ext_prop=(110-Size)/110) %>% group_by(Last_deleted, Ext_prop) %>% summarise(median_QSS_q3=quantile(maxre, 0.75))
+#
+e <- ggplot() + 
+  geom_line(data=QSSe_ts, aes(x=Ext_prop, y=maxre, colour=maxre), size=0.7) +
+  geom_point(data=QSSe_ts, aes(x=Ext_prop, y=maxre, colour=maxre), size=2) +
+  geom_line(data=q1, aes(x=Ext_prop, y=median_QSS_q1), colour="grey80") + 
+  geom_line(data=q3, aes(x=Ext_prop, y=median_QSS_q3), colour="grey80") + 
+  theme_new +
+  labs(x="", y="", 
+       title="Trophic Similarity") + 
+  geom_vline(xintercept=0.318181818, linetype="dashed", colour="grey30") +
+  coord_cartesian(xlim=c(0, 0.4)) +
+  scale_colour_gradient(high="#d9f0a3", low="#006837") +
+  theme(legend.title=element_text(color="white")) +
+  theme(legend.position="none")
+#
+# Plots in a single plot
+title_theme <- ggdraw() +
+               draw_label("Extinctions by decreasing:",
+               fontface="bold",
+               size=26)
+
+gridded <- plot_grid(a, b, c, d, e,
+                     nrow=5, ncol=1, 
+                     labels=c("(a)", "(b)", "(c)", "(d)", "(e)"), label_size=18 
+                     #hjust=-1.3,
+                     #vjust=2,
+                     #scale=1
+                     )
+
+plot <- plot_grid(title_theme, gridded, ncol=1, rel_heights=c(0.03, 0.97))
+
+ylab <- textGrob("Stability", 
+                 gp=gpar(fontface="bold", fontsize=26), 
+                 rot=90,
+                 vjust=0.5)
+
+xlab <- textGrob("Proportion of extinguish species", 
+                 gp=gpar(fontface="bold", fontsize=26),
+                 vjust=-0.5)
+
+plot <- grid.arrange(arrangeGrob(plot, left=ylab, bottom=xlab))
+#
+# Save figure
+ggsave("Figures/QSS.svg", plot, width=10, height=25)
+
+```
