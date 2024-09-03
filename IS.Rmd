@@ -252,7 +252,7 @@ summary(TS_qlm_q75, se = "boot")
 ```{r stability-sim}
 #
 # Load sequential simulation results 
-load("Data/pc-is/wQSS_seq_extinctions.rds")
+load("Data/wQSS_seq_extinctions.rds")
 
 ```
 
